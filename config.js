@@ -3,7 +3,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/fireba
 import { getDatabase, ref, set, push, get, child } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
 
 const firebaseConfig = {
-  apiKey: "xxxxxxxxxxxxx",
+  apiKey: "AIzaSyCMQu94tf4my3KvFZth_n-bWvXj5Z2c5LA",
   authDomain: "aj-taa-fixed.firebaseapp.com",
   databaseURL: "https://aj-taa-fixed-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "aj-taa-fixed",
