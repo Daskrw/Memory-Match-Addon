@@ -1,0 +1,239 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Memory Match — Global Leaderboard</title>
+<link rel="stylesheet" href="static/style.css"/>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="static/config.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>Memory Match</h1>
+  <span id="backendBadge" class="badge">Backend: Local only</span>
+  <span id="playerBadge" class="badge">Player: (not set)</span>
+  <span id="modeBadge" class="badge">Mode: Classic</span>
+  <div style="margin-left:auto;display:flex;gap:8px">
+    <button id="btnEditPlayer">Edit Player</button>
+    <button id="btnLeaderboard">Leaderboard</button>
+    <button id="btnCustomMode" class="primary">Custom</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="topbar panel">
+    <div class="stats">
+      <div>Level:
+        <select id="levelSelect">
+          <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+          <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+          <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+          <option value="10">10</option>
+        </select>
+      </div>
+      <div>Time: <span id="timeLbl">00:00</span></div>
+      <div>Total Score: <span id="scoreLbl">0</span></div>
+    </div>
+    <div><button id="newGameBtn">New Game</button></div>
+  </div>
+
+  <div class="board-wrap panel">
+    <div id="board"></div>
+    <div id="countdown" class="countdown" style="display:none">5</div>
+  </div>
+
+  <div class="toolbar panel">
+    <div><button class="skill" id="revealBtn">Reveal</button><span class="cool" id="revealCD"></span></div>
+    <div><button class="skill" id="autoBtn">Auto-match</button><span class="cool" id="autoCD"></span></div>
+    <div><button class="skill" id="slowBtn">Slow</button><span class="cool" id="slowCD"></span></div>
+  </div>
+</div>
+
+<footer><div class="tiny-hint">Add <code>static/config.js</code> with Firebase config to enable Global leaderboard.</div></footer>
+
+<!-- Player Modal -->
+<div id="playerModal" class="modal" style="display:none">
+  <div class="box">
+    <h3>Player Profile</h3>
+    <div class="row"><label>Name *</label><input id="playerName" placeholder="Your name"/></div>
+    <div class="row"><label>Note</label><input id="playerNote" placeholder="e.g., class group"/></div>
+    <div class="row right">
+      <button id="cancelPlayer">Cancel</button>
+      <button id="savePlayer" class="primary">Save</button>
+    </div>
+    <div class="tiny-hint">* Name must be unique globally.</div>
+  </div>
+</div>
+
+<!-- Leaderboard Modal -->
+<div id="leaderModal" class="modal" style="display:none">
+  <div class="box">
+    <h3>Leaderboard (Top 50)</h3>
+    <div id="leaderInfo" class="tiny-hint" style="margin:4px 0 8px"></div>
+    <div style="max-height:50dvh;overflow:auto">
+      <table class="table">
+        <thead><tr><th>#</th><th>Name</th><th>Best Total</th><th>Updated</th></tr></thead>
+        <tbody id="leaderBody"></tbody>
+      </table>
+    </div>
+    <div class="row right" style="margin-top:8px">
+      <button id="refreshLeader">Refresh</button>
+      <button id="closeLeader" class="primary">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Custom Mode Modal -->
+<div id="customModal" class="modal" style="display:none">
+  <div class="box">
+    <h3>Custom Mode (no scoring)</h3>
+    <div class="row"><label>Grid</label>
+      <select id="customGrid">
+        <option value="4x5">4 × 5 (10 pairs)</option>
+        <option value="5x6">5 × 6 (15 pairs)</option>
+        <option value="6x6">6 × 6 (18 pairs)</option>
+        <option value="6x8">6 × 8 (24 pairs)</option>
+      </select>
+    </div>
+    <div class="row"><label>Start time (sec)</label><input id="customTime" type="number" min="5" value="60"/></div>
+    <div class="row"><label>Bonus per match (sec)</label><input id="customBonus" type="number" min="0" value="0"/></div>
+    <div class="row"><label>Reveal cooldown (s, 0=off)</label><input id="cdReveal" type="number" min="0" value="30"/></div>
+    <div class="row"><label>Auto-match cooldown (s, 0=off)</label><input id="cdAuto" type="number" min="0" value="30"/></div>
+    <div class="row"><label>Slow cooldown (s, 0=off)</label><input id="cdSlow" type="number" min="0" value="30"/></div>
+    <div class="tiny-hint">5s countdown before start. Game timer counts down including bonus time.</div>
+    <div class="row right" style="margin-top:8px">
+      <button id="backClassic">Back to Classic</button>
+      <button id="cancelCustom">Cancel</button>
+      <button id="startCustom" class="primary">Start</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const LEVELS={1:{rows:4,cols:5,time:60,bonus:10},2:{rows:4,cols:5,time:60,bonus:10},3:{rows:4,cols:5,time:60,bonus:10},4:{rows:5,cols:6,time:70,bonus:9},5:{rows:5,cols:6,time:70,bonus:9},6:{rows:5,cols:6,time:70,bonus:9},7:{rows:6,cols:6,time:45,bonus:8},8:{rows:6,cols:6,time:45,bonus:8},9:{rows:6,cols:6,time:45,bonus:8},10:{rows:6,cols:8,time:25,bonus:5,reshuffle:true}};
+const CARD_COLORS=["#0ea5e9","#22c55e","#f59e0b","#ef4444","#a78bfa","#14b8a6","#f97316","#22d3ee","#eab308","#34d399","#f472b6","#60a5fa"];
+let state={level:1,grid:[],firstPick:null,lockBoard:false,pairsFound:0,pairsTotal:0,timeLeft:0,lastTick:0,running:false,speedMultiplier:1.0,speedUntil:0,cd:{reveal:0,auto:0,slow:0},pendingSkill:null,reshuffleTimer:0,countdownUntil:0,totalScore:0,customMode:false,custom:{rows:4,cols:5,time:60,bonus:0,cd:{reveal:30,auto:30,slow:30},reshuffle:false}};
+
+const levelSelect=document.getElementById('levelSelect'),newGameBtn=document.getElementById('newGameBtn'),timeLbl=document.getElementById('timeLbl'),scoreLbl=document.getElementById('scoreLbl'),boardEl=document.getElementById('board'),countdownEl=document.getElementById('countdown'),revealBtn=document.getElementById('revealBtn'),autoBtn=document.getElementById('autoBtn'),slowBtn=document.getElementById('slowBtn'),revealCD=document.getElementById('revealCD'),autoCD=document.getElementById('autoCD'),slowCD=document.getElementById('slowCD'),backendBadge=document.getElementById('backendBadge'),playerBadge=document.getElementById('playerBadge'),modeBadge=document.getElementById('modeBadge');
+const playerModal=document.getElementById('playerModal'),playerNameEl=document.getElementById('playerName'),playerNoteEl=document.getElementById('playerNote');
+const leaderModal=document.getElementById('leaderModal'),leaderInfo=document.getElementById('leaderInfo'),leaderBody=document.getElementById('leaderBody');
+const customModal=document.getElementById('customModal'),customGridEl=document.getElementById('customGrid'),customTimeEl=document.getElementById('customTime'),customBonusEl=document.getElementById('customBonus'),cdRevealEl=document.getElementById('cdReveal'),cdAutoEl=document.getElementById('cdAuto'),cdSlowEl=document.getElementById('cdSlow');
+
+document.getElementById('btnEditPlayer').onclick=()=>{preloadPlayer();playerModal.style.display='flex';};
+document.getElementById('btnLeaderboard').onclick=()=>{leaderModal.style.display='flex';loadLeaderboard();};
+document.getElementById('btnCustomMode').onclick=()=>{preloadCustom();customModal.style.display='flex';};
+document.getElementById('cancelPlayer').onclick=()=>playerModal.style.display='none';
+document.getElementById('savePlayer').onclick=onSavePlayer;
+document.getElementById('closeLeader').onclick=()=>leaderModal.style.display='none';
+document.getElementById('refreshLeader').onclick=loadLeaderboard;
+document.getElementById('cancelCustom').onclick=()=>customModal.style.display='none';
+document.getElementById('backClassic').onclick=()=>{state.customMode=false;modeBadge.textContent='Mode: Classic';startGame({resetScore:true});customModal.style.display='none';};
+document.getElementById('startCustom').onclick=startCustomMode;
+levelSelect.onchange=()=>{state.totalScore=0;modeBadge.textContent='Mode: Classic';state.customMode=false;startGame();};
+newGameBtn.onclick=()=>{state.totalScore=0;startGame();};
+revealBtn.onclick=()=>tryActivateSkill('reveal');autoBtn.onclick=()=>tryActivateSkill('auto');slowBtn.onclick=()=>tryActivateSkill('slow');
+
+function formatTime(sec){sec=Math.max(0,Math.ceil(sec));const m=String(Math.floor(sec/60)).padStart(2,'0');const s=String(sec%60).padStart(2,'0');return m+':'+s;}
+function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=(Math.random()*(i+1))|0;[arr[i],arr[j]]=[arr[j],arr[i]]}return arr;}
+function buildDeck(rows,cols){const pairs=(rows*cols)/2,deck=[];for(let t=0;t<pairs;t++){deck.push({type:t});deck.push({type:t});}shuffle(deck);return deck;}
+function cooldownMs(skill){return state.customMode?((state.custom.cd?.[skill]??0)*1000):30000;}
+function updateCooldownLabels(){const now=performance.now(),left=ms=>ms<=0?'':Math.ceil(ms/1000)+'s';revealCD.textContent=left(state.cd.reveal-now);autoCD.textContent=left(state.cd.auto-now);slowCD.textContent=left(state.cd.slow-now);}
+function flashMessage(t){document.title='★ '+t+' | Memory Match';setTimeout(()=>document.title='Memory Match',1500);}
+
+function startGame(opts){let cfg;if(state.customMode){cfg={rows:state.custom.rows,cols:state.custom.cols,time:state.custom.time,bonus:state.custom.bonus,reshuffle:state.custom.reshuffle};}else{const lv=+levelSelect.value;state.level=lv;cfg=LEVELS[lv];}
+if(opts?.resetScore){state.totalScore=0;scoreLbl.textContent='0';}
+state.grid=[];state.firstPick=null;state.lockBoard=false;state.pairsFound=0;state.pairsTotal=(cfg.rows*cfg.cols)/2;state.timeLeft=cfg.time;state.lastTick=performance.now();state.running=false;state.reshuffleTimer=0;
+state.countdownUntil=performance.now()+5000;countdownEl.style.display='flex';countdownEl.textContent='5';
+boardEl.innerHTML='';boardEl.style.gridTemplateColumns=`repeat(${cfg.cols}, auto)`; /* auto = compact spacing on wide screens */
+const deck=buildDeck(cfg.rows,cfg.cols);deck.forEach((card,i)=>{const el=document.createElement('div');el.className='card';el.dataset.type=card.type;el.dataset.index=i;el.dataset.matched='0';el.innerHTML=`<div class="inner"><div class="front" style="background:${CARD_COLORS[card.type % CARD_COLORS.length]}"></div><div class="back"></div></div>`;el.addEventListener('click',onCardClick);state.grid.push(el);boardEl.appendChild(el);});
+window.requestAnimationFrame(gameLoop);}
+
+function onCardClick(e){const el=e.currentTarget;if(!state.running||state.lockBoard)return;if(el.classList.contains('flipped')||el.dataset.matched==='1')return;
+if(state.pendingSkill){const s=state.pendingSkill;state.pendingSkill=null;if(s==='reveal')return useRevealSkill(el);if(s==='auto')return useAutoMatchSkill(el);}
+el.classList.add('flipped');if(!state.firstPick){state.firstPick=el;return;}
+const a=state.firstPick,b=el;state.firstPick=null;const same=a.dataset.type===b.dataset.type;
+if(same){a.dataset.matched='1';b.dataset.matched='1';a.classList.add('matched');b.classList.add('matched');state.pairsFound++;const bonus=state.customMode?state.custom.bonus:LEVELS[state.level].bonus;state.timeLeft+=bonus;if(state.pairsFound===state.pairsTotal){winGame();}}
+else{state.lockBoard=true;setTimeout(()=>{a.classList.remove('flipped');b.classList.remove('flipped');state.lockBoard=false;},Math.round(700/state.speedMultiplier));}}
+
+function useRevealSkill(target){const now=performance.now(),cd=cooldownMs('reveal');if(cd===0)return;if(state.cd.reveal>now)return;state.cd.reveal=now+cd;const t=target.dataset.type;const targets=state.grid.filter(el=>el.dataset.type===t&&el.dataset.matched==='0');targets.forEach(el=>el.classList.add('ghost-reveal'));setTimeout(()=>targets.forEach(el=>el.classList.remove('ghost-reveal')),3000);}
+function useAutoMatchSkill(target){const now=performance.now(),cd=cooldownMs('auto');if(cd===0)return;if(state.cd.auto>now)return;state.cd.auto=now+cd;const t=target.dataset.type;const pair=state.grid.find(el=>el!==target&&el.dataset.type===t&&el.dataset.matched==='0');if(!pair)return;target.classList.add('flipped','matched');pair.classList.add('flipped','matched');target.dataset.matched='1';pair.dataset.matched='1';state.pairsFound++;const bonus=state.customMode?state.custom.bonus:LEVELS[state.level].bonus;state.timeLeft+=bonus;if(state.pairsFound===state.pairsTotal){winGame();}}
+
+function gameLoop(now){if(state.countdownUntil>0){const left=Math.ceil((state.countdownUntil-now)/1000);if(left>0){countdownEl.style.display='flex';countdownEl.textContent=left;window.requestAnimationFrame(gameLoop);return;}countdownEl.style.display='none';state.countdownUntil=0;state.running=true;state.lastTick=now;}
+const dt=(now-state.lastTick)/1000;state.lastTick=now;state.speedMultiplier=(state.speedUntil>now)?0.75:1.0;state.timeLeft-=dt*state.speedMultiplier;timeLbl.textContent=formatTime(state.timeLeft);updateCooldownLabels();
+if(!state.customMode&&LEVELS[state.level]?.reshuffle){state.reshuffleTimer+=dt;if(state.reshuffleTimer>=20){state.reshuffleTimer=0;reshuffleUnmatched();}}
+if(state.timeLeft<=0){loseGame();return;}if(state.running)window.requestAnimationFrame(gameLoop);}
+function reshuffleUnmatched(){const rest=state.grid.filter(el=>el.dataset.matched==='0'&&!el.classList.contains('flipped'));if(rest.length<2)return;const types=rest.map(el=>el.dataset.type);shuffle(types);rest.forEach((el,i)=>el.dataset.type=types[i]);flashMessage('Reshuffled remaining cards!');}
+function tryActivateSkill(skill){const now=performance.now();if(skill==='slow'){const cd=cooldownMs('slow');if(cd===0)return;if(state.cd.slow>now)return;state.speedMultiplier=0.75;state.speedUntil=now+5000;state.cd.slow=now+cd;flashMessage('Slow x0.75 for 5s');return;}
+const cd=cooldownMs(skill);if(cd===0)return;if(state.cd[skill]>now)return;state.pendingSkill=skill;flashMessage('Click a card to use '+skill.toUpperCase());}
+function winGame(){state.running=false;const award=Math.ceil(state.timeLeft)*10;if(!state.customMode){state.totalScore+=award;scoreLbl.textContent=state.totalScore;submitTotalScore(state.totalScore);}flashMessage(`Level clear! +${award} pts`+(state.customMode?' (not accumulated in Custom)':''));if(!state.customMode&&state.level<10){state.level++;levelSelect.value=state.level;startGame();}}
+function loseGame(){state.running=false;flashMessage('Time is up!');}
+
+function preloadPlayer(){const p=JSON.parse(localStorage.getItem('player')||'{}');playerNameEl.value=p.name||'';playerNoteEl.value=p.note||'';}
+function updatePlayerBadge(){const p=JSON.parse(localStorage.getItem('player')||'{}');playerBadge.textContent='Player: '+(p.name||'(not set)');}
+function preloadCustom(){const cfg=JSON.parse(localStorage.getItem('customCfg')||'{}');customGridEl.value=cfg.grid||'4x5';customTimeEl.value=cfg.time??60;customBonusEl.value=cfg.bonus??0;cdRevealEl.value=cfg.cdReveal??30;cdAutoEl.value=cfg.cdAuto??30;cdSlowEl.value=cfg.cdSlow??30;}
+function startCustomMode(){const grid=customGridEl.value;const [rows,cols]=grid.split('x').map(Number);const time=Math.max(5,+customTimeEl.value||60);const bonus=Math.max(0,+customBonusEl.value||0);const cdR=Math.max(0,+cdRevealEl.value||0);const cdA=Math.max(0,+cdAutoEl.value||0);const cdS=Math.max(0,+cdSlowEl.value||0);localStorage.setItem('customCfg',JSON.stringify({grid,time,bonus,cdReveal:cdR,cdAuto:cdA,cdSlow:cdS}));state.customMode=true;state.custom={rows,cols,time,bonus,cd:{reveal:cdR,auto:cdA,slow:cdS},reshuffle:(rows===6&&cols===8)};modeBadge.textContent='Mode: Custom';startGame({resetScore:true});customModal.style.display='none';}
+
+let db=null,auth=null,backend='local',currentUid=null;
+function nameKey(n){return n.trim().toLowerCase().replace(/\s+/g,'_');}
+async function initBackend(){const cfg=(window.FIREBASE_CONFIG||null);if(!cfg){backend='local';backendBadge.textContent='Backend: Local only';updatePlayerBadge();startGame();return;}
+try{const app=firebase.initializeApp(cfg);auth=firebase.auth();db=firebase.firestore();await auth.signInAnonymously();currentUid=auth.currentUser.uid;backend='firebase';backendBadge.textContent='Backend: Firebase';}
+catch(e){console.warn('Firebase init failed',e);backend='local';backendBadge.textContent='Backend: Local only';}
+updatePlayerBadge();startGame();}
+async function onSavePlayer(){const name=playerNameEl.value.trim(),note=playerNoteEl.value.trim();if(!name){alert('Please enter name');return;}localStorage.setItem('player',JSON.stringify({name,note}));updatePlayerBadge();
+if(backend==='firebase'&&db){const key=nameKey(name),ref=db.collection('users').doc(key);try{await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(snap.exists){const owner=snap.data().ownerUid;if(owner!==currentUid)throw new Error('This name is already taken.');tx.set(ref,{ownerUid:currentUid,nameDisplay:name,note},{merge:true});}else{tx.set(ref,{ownerUid:currentUid,nameDisplay:name,note,created:Date.now()});}});alert('Player saved.');playerModal.style.display='none';}catch(e){alert('Cannot use this name: '+e.message);localStorage.removeItem('player');updatePlayerBadge();}}else{playerModal.style.display='none';}}
+async function submitTotalScore(total){const p=JSON.parse(localStorage.getItem('player')||'{}');if(!p.name)return;const payload={name:p.name,best:total,ts:Date.now()};if(backend==='firebase'&&db){const key=nameKey(p.name),ref=db.collection('scores').doc(key);try{await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(!snap.exists){tx.set(ref,payload);}else{const old=snap.data().best||0;if(total>old){tx.update(ref,{best:total,ts:Date.now()});}}});}catch(e){console.warn('submit score failed',e);}}else{const key=nameKey(p.name),map=JSON.parse(localStorage.getItem('localScores')||'{}');const old=map[key]?.best||0;if(total>old){map[key]={name:p.name,best:total,ts:Date.now()};localStorage.setItem('localScores',JSON.stringify(map));}}}
+async function loadLeaderboard(){leaderBody.innerHTML='';if(backend==='firebase'&&db){leaderInfo.textContent='Global (Firebase)';const snap=await db.collection('scores').orderBy('best','desc').limit(50).get();let i=1;snap.forEach(doc=>{const r=doc.data();const tr=document.createElement('tr');tr.innerHTML=`<td>${i++}</td><td>${r.name||'-'}</td><td>${r.best||0}</td><td>${new Date(r.ts||Date.now()).toLocaleString()}</td>`;leaderBody.appendChild(tr);});}else{leaderInfo.textContent='Local only (add static/config.js to enable global)';const map=JSON.parse(localStorage.getItem('localScores')||'{}');const arr=Object.values(map).sort((a,b)=>b.best-a.best).slice(0,50);arr.forEach((r,i)=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${i+1}</td><td>${r.name||'-'}</td><td>${r.best||0}</td><td>${new Date(r.ts||Date.now()).toLocaleString()}</td>`;leaderBody.appendChild(tr);});}}
+
+initBackend();
+</script>
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getDatabase, ref, push, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+    // TODO: Replace with your Firebase project config
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      databaseURL: "https://YOUR_PROJECT.firebaseio.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // Save score function
+    function saveScore(playerName, score) {
+      const scoresRef = ref(db, 'leaderboard');
+      push(scoresRef, { name: playerName, score: score, time: Date.now() });
+    }
+
+    // Load leaderboard
+    function loadLeaderboard() {
+      const scoresRef = ref(db, 'leaderboard');
+      onValue(scoresRef, (snapshot) => {
+        const list = document.getElementById("leaderboard-list");
+        if (!list) return;
+        list.innerHTML = "";
+        snapshot.forEach((childSnapshot) => {
+          const data = childSnapshot.val();
+          const li = document.createElement("li");
+          li.textContent = `${data.name}: ${data.score}`;
+          list.appendChild(li);
+        });
+      });
+    }
+
+    // Example usage
+    document.addEventListener("DOMContentLoaded", () => {
+      saveScore("Player1", 100); // test save
+      loadLeaderboard();
+    });
+  </script>
+</body>
+</html>
