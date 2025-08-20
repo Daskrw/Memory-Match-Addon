@@ -32,8 +32,18 @@ function saveScore(playerName, score) {
 async function getScores() {
   const snapshot = await get(child(ref(db), 'leaderboards'));
   if (snapshot.exists()) {
-    console.log(snapshot.val());
+    const scores = snapshot.val();
+    const leaderboardDiv = document.getElementById("leaderboard");
+    leaderboardDiv.innerHTML = ""; // ล้างก่อน
+
+    // แปลง object → array
+    Object.values(scores).forEach(scoreData => {
+      const p = document.createElement("p");
+      p.textContent = `${scoreData.name} - ${scoreData.score}`;
+      leaderboardDiv.appendChild(p);
+    });
   } else {
     console.log("No data available");
   }
 }
+
